@@ -100,38 +100,7 @@ if [[ "${CHECK_ONLY:-0}" == "1" ]]; then
 fi
 
 # --------------------------------------------------------------------------
-# 2. Put the files where the paths expect them.
-# --------------------------------------------------------------------------
-step "Placing the files"
-
-mkdir -p "$SHARE" "$VENV/bin" "$HOME/.config/systemd/user" "$(dirname "$OPENCODE_CFG")"
-
-# The upstream files hardcode /home/dhh. Rewrite only if this home differs.
-rewrite() {
-  local f="$1"
-  if [[ "$HOME" != "$SOURCE_HOME" ]] && grep -q "$SOURCE_HOME" "$f" 2>/dev/null; then
-    sed -i "s|$SOURCE_HOME|$HOME|g" "$f"
-  fi
-}
-
-for f in "$HERE"/modules/scrapling_*.py; do
-  install -m 0644 "$f" "$SHARE/$(basename "$f")"
-  rewrite "$SHARE/$(basename "$f")"
-done
-install -m 0644 "$HERE/modules/DIAGNOSTIC.md" "$SHARE/DIAGNOSTIC.md"
-ok "modules in $SHARE"
-
-for f in "$HERE"/bin/*; do
-  install -m 0755 "$f" "$VENV/bin/$(basename "$f")"
-  rewrite "$VENV/bin/$(basename "$f")"
-done
-ok "commands in $VENV/bin"
-
-# policy.json is a generated file; seed it only when absent.
-[[ -f "$SHARE/policy.json" ]] || install -m 0644 "$HERE/modules/policy.example.json" "$SHARE/policy.json"
-
-# --------------------------------------------------------------------------
-# 3. The Python environment.
+# 2. The Python environment.
 # --------------------------------------------------------------------------
 step "Python environment"
 
@@ -175,6 +144,37 @@ import scrapling, playwright, patchright
 for name in ("scrapling", "playwright", "patchright"):
     print("  ok   %s %s" % (name, md.version(name)))
 PY
+
+# --------------------------------------------------------------------------
+# 3. Put the files where the paths expect them.
+# --------------------------------------------------------------------------
+step "Placing the files"
+
+mkdir -p "$SHARE" "$HOME/.config/systemd/user" "$(dirname "$OPENCODE_CFG")"
+
+# The upstream files hardcode /home/dhh. Rewrite only if this home differs.
+rewrite() {
+  local f="$1"
+  if [[ "$HOME" != "$SOURCE_HOME" ]] && grep -q "$SOURCE_HOME" "$f" 2>/dev/null; then
+    sed -i "s|$SOURCE_HOME|$HOME|g" "$f"
+  fi
+}
+
+for f in "$HERE"/modules/scrapling_*.py; do
+  install -m 0644 "$f" "$SHARE/$(basename "$f")"
+  rewrite "$SHARE/$(basename "$f")"
+done
+install -m 0644 "$HERE/modules/DIAGNOSTIC.md" "$SHARE/DIAGNOSTIC.md"
+ok "modules in $SHARE"
+
+for f in "$HERE"/bin/*; do
+  install -m 0755 "$f" "$VENV/bin/$(basename "$f")"
+  rewrite "$VENV/bin/$(basename "$f")"
+done
+ok "commands in $VENV/bin"
+
+# policy.json is a generated file; seed it only when absent.
+[[ -f "$SHARE/policy.json" ]] || install -m 0644 "$HERE/modules/policy.example.json" "$SHARE/policy.json"
 
 # --------------------------------------------------------------------------
 # 4. Reclaim the duplicate Node runtime (btrfs only).
