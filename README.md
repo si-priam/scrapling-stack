@@ -47,6 +47,11 @@ on the scraper's side never reach your real profile — but that also means
 the sync carries it across within about two minutes, or the moment a scrape
 starts. You never run anything.
 
+Profiles are found on their own. Every real profile in your daily Brave — the
+Default one you use, plus any others — is carried across, and a profile you
+create later is added the first time the sync runs after that. Nothing to name,
+nothing to configure.
+
 `du` will over-report these folders because shared blocks are counted twice.
 `btrfs filesystem du -s <folder>` is the honest number; read the **Exclusive**
 column.

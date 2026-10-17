@@ -280,6 +280,41 @@ def _profile_names() -> list[str]:
     return names
 
 
+def _adopt_new_profiles() -> list[str]:
+    """Profiles created in your daily Brave since the share was made.
+
+    A brand-new profile folder does not exist on the scraper side yet, so
+    nothing would sync into it. Add it there first as a copy-on-write clone -
+    which costs almost no disk and is never a plain copy - and from then on it
+    takes part in the sync like Default does.
+    """
+    adopted: list[str] = []
+    if not DAILY.is_dir() or not SCRAPER.is_dir():
+        return adopted
+    for entry in sorted(DAILY.iterdir()):
+        if not entry.is_dir() or not (entry / "Preferences").exists():
+            continue
+        target = SCRAPER / entry.name
+        if target.exists():
+            continue
+        cloned = subprocess.run(
+            ["cp", "-a", "--reflink=always", str(entry), str(target)],
+            capture_output=True,
+        )
+        if cloned.returncode != 0:
+            try:
+                shutil.copytree(entry, target, dirs_exist_ok=True)
+            except Exception:                        # never fatal to the sync
+                continue
+        for lock in target.glob("Singleton*"):
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+        adopted.append(entry.name)
+    return adopted
+
+
 def _source_mtime() -> float:
     """Newest change across the credential files we watch.
 
@@ -348,6 +383,8 @@ def sync_credentials(force: bool = False, mirror: bool = False,
         report["detail"] = "a scraper browser is running; not touching the profile"
         return report
 
+    adopted = _adopt_new_profiles()
+
     names = _profile_names()
     if not names:
         report["status"] = "no-daily-profile"
@@ -399,6 +436,8 @@ def sync_credentials(force: bool = False, mirror: bool = False,
         report["detail"] = "no credential files found to sync"
     else:
         report["detail"] = ("refreshed " + ", ".join(report["touched"]))
+        if adopted:
+            report["detail"] += "; added " + ", ".join(adopted)
 
     if report["status"] in ("synced", "unchanged"):
         # Only advance the watermark when the pass genuinely completed, so a
