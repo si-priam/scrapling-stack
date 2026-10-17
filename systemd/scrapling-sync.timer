@@ -1,0 +1,14 @@
+[Unit]
+Description=Keep the Scrapling scraper profile in step with your daily Brave
+
+[Timer]
+# Shortly after login, then regularly. Each run is a timestamp check unless
+# your daily Brave actually changed something, and it stands down entirely
+# while a scraper browser is running.
+OnBootSec=90s
+OnUnitActiveSec=2min
+AccuracySec=30s
+Unit=scrapling-sync.service
+
+[Install]
+WantedBy=timers.target

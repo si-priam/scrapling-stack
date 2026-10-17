@@ -1,0 +1,10 @@
+[Unit]
+Description=Sync the Scrapling profile logins from your daily Brave
+Documentation=man:scrapling-sync(1)
+
+[Service]
+Type=oneshot
+# Quiet by default: it only speaks up when something actually changed.
+ExecStart=/home/dhh/venvs/scrapling/bin/scrapling-sync --quiet
+Nice=15
+IOSchedulingClass=idle

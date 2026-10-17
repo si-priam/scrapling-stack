@@ -1,0 +1,95 @@
+#!/home/dhh/venvs/scrapling/bin/python
+"""Diagnostic: which real sites fail at which tier, and why.
+
+    ~/venvs/scrapling/bin/diagnose-sites            # tier 1 sweep (fast)
+    ~/venvs/scrapling/bin/diagnose-sites --deep     # + escalate failures to tier 2/3
+"""
+import sys, time, re
+sys.path.insert(0, "/home/dhh/.local/share/scrapling")
+from scrapling_brave import fetch, dynamic, stealth, is_blocked
+
+SITES = [
+    # category,           url
+    ("plain",      "https://example.com"),
+    ("plain",      "https://quotes.toscrape.com/"),
+    ("reference",  "https://en.wikipedia.org/wiki/Scholarship"),
+    ("search",     "https://lite.duckduckgo.com/lite/?q=test"),
+    ("search",     "https://duckduckgo.com/?q=test"),
+    ("search",     "https://www.bing.com/search?q=test"),
+    ("search",     "https://www.startpage.com/sp/search?query=test"),
+    ("search",     "https://search.brave.com/search?q=test"),
+    ("search",     "https://www.mojeek.com/search?q=test"),
+    ("search",     "https://html.duckduckgo.com/html/?q=test"),
+    ("scholarship","https://apiascholars.org/scholarships/"),
+    ("scholarship","https://caafoundation.org/programs/aays/2027/"),
+    ("scholarship","https://scholarshipinfocenter.com/fully-funded-summer-programs-2027-2028/"),
+    ("scholarship","https://www.pathwaystoscience.org/programs.aspx"),
+    ("scholarship","https://www.scholarships.com/"),
+    ("cf-demo",    "https://nopecha.com/demo/cloudflare"),
+    ("cdn",        "https://cdnjs.com/"),
+]
+
+
+def content_ok(page):
+    """A page only counts as OK if it is NOT a wall AND yielded extractable text.
+
+    Checking text length alone was a false positive: a Cloudflare block page
+    carries its own prose ("This website uses a security service..."), which
+    counted as content. is_blocked must be consulted too.
+    """
+    if is_blocked(page):
+        return False, 0
+    try:
+        nodes = page.css("h1::text, h2::text, p::text, li::text, td::text, article::text")
+        txt = "".join(str(v) for v in nodes.getall())
+    except Exception:
+        txt = ""
+    return len(txt.strip()) >= 200, len(txt.strip())
+
+
+def sweep():
+    rows = []
+    print(f"{'cat':<11}{'status':>7} {'secs':>6} {'blk':>5} {'text':>7}  url")
+    print("-" * 84)
+    for cat, url in SITES:
+        t0 = time.time()
+        try:
+            p = fetch(url, timeout=25000)
+            ok, n = content_ok(p)
+            rows.append((cat, url, p.status, is_blocked(p), ok, n, None))
+            print(f"{cat:<11}{p.status:>7} {time.time()-t0:>6.1f} {str(is_blocked(p)):>5} {n:>7}  {url[:44]}")
+        except Exception as e:
+            rows.append((cat, url, 0, False, False, 0, type(e).__name__))
+            print(f"{cat:<11}{'ERR':>7} {time.time()-t0:>6.1f} {'-':>5} {'-':>7}  {url[:44]} ({type(e).__name__})")
+    return rows
+
+
+def deep(rows):
+    bad = [r for r in rows if not r[4]]
+    if not bad:
+        print("\nNothing to escalate — all tier-1 results had content.")
+        return
+    print(f"\n{'='*84}\nEscalating {len(bad)} failing site(s) to tier 2 / tier 3\n{'='*84}")
+    for cat, url, st, blk, ok, n, err in bad:
+        for tier, fn, kw in (("tier2 headless", dynamic, {"headless": True, "timeout": 40000}),
+                             ("tier3 headed  ", stealth,  {"headless": False, "solve_cloudflare": True, "timeout": 60000})):
+            try:
+                t0 = time.time()
+                p = fn(url, **kw)
+                ok2, n2 = content_ok(p)
+                verdict = "CONTENT OK" if ok2 else "still blocked/empty"
+                print(f"  {cat:<11} {url[:40]:<40} {tier} -> {verdict:<18} "
+                      f"status={p.status} blocked={is_blocked(p)} text={n2} [{time.time()-t0:.1f}s]")
+                if ok2:
+                    break
+            except Exception as e:
+                print(f"  {cat:<11} {url[:40]:<40} {tier} -> ERROR {type(e).__name__}: {str(e)[:60]}")
+
+
+if __name__ == "__main__":
+    r = sweep()
+    good = sum(1 for x in r if x[4])
+    print(f"\nTIER 1: {good}/{len(r)} returned real content, "
+          f"{sum(1 for x in r if x[3])} flagged blocked, {len(r)-good} need escalation")
+    if "--deep" in sys.argv:
+        deep(r)

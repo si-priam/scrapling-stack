@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "scrapling": {
+        "type": "local",
+        "command": [
+          "/home/dhh/venvs/scrapling/bin/scrapling-mcp",
+          "--executable-path",
+          "/opt/brave.com/brave-nightly/brave"
+        ]
+      }
+    }
+  }
+}

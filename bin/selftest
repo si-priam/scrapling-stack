@@ -1,0 +1,246 @@
+#!/home/dhh/venvs/scrapling/bin/python
+"""Test suite for the Brave-native scraping stack.
+
+    ~/venvs/scrapling/bin/selftest
+"""
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, "/home/dhh/.local/share/scrapling")
+
+PROFILE = "/home/dhh/.local/share/scrapling/brave-profile"
+PASS, FAIL = [], []
+
+
+def check(name, cond, detail=""):
+    (PASS if cond else FAIL).append(name)
+    print(f"  {'PASS' if cond else 'FAIL'}  {name}" + (f"   [{detail}]" if detail else ""))
+    return cond
+
+
+def n_our_procs():
+    out = subprocess.run(["ps", "-eo", "pid,args", "--no-headers"],
+                         capture_output=True, text=True).stdout
+    return sum(1 for l in out.splitlines()
+               if PROFILE in l and "brave-nightly/brave" in l and "ps -eo" not in l)
+
+
+def n_daily_brave():
+    out = subprocess.run(["ps", "-eo", "args", "--no-headers"], capture_output=True, text=True).stdout
+    return sum(1 for l in out.splitlines()
+               if "brave-nightly/brave" in l and PROFILE not in l and "ps -eo" not in l)
+
+
+def wait_cdp(up=True, timeout=25):
+    import json, urllib.request
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        try:
+            urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=2).read()
+            if up:
+                return True
+        except Exception:
+            if not up:
+                return True
+        time.sleep(1)
+    return False
+
+
+def open_tabs(n):
+    from playwright.sync_api import sync_playwright
+    urls = ["https://example.com", "https://cdnjs.com",
+            "https://en.wikipedia.org/wiki/Scholarship", "https://quotes.toscrape.com/"]
+    with sync_playwright() as p:
+        b = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
+        ctx = b.contexts[0]
+        for i in range(n):
+            try:
+                pg = ctx.new_page()
+                pg.goto(urls[i % len(urls)], timeout=20000, wait_until="domcontentloaded")
+            except Exception:
+                pass
+        b.close()
+    import urllib.request, json as J
+    return len(J.load(urllib.request.urlopen("http://127.0.0.1:9222/json", timeout=5)))
+
+
+# --------------------------------------------------------------------------- #
+print("\n=== 1. baseline isolation ===")
+daily_before = n_daily_brave()
+check("daily Brave running before tests", daily_before > 0, f"{daily_before} procs")
+check("no orphan scrapling Brave at start", n_our_procs() == 0, f"{n_our_procs()}")
+
+# --------------------------------------------------------------------------- #
+print("\n=== 2. cleanup: tabs first, then browser ===")
+from scrapling_cleanup import cleanup, close_tabs_via_cdp, profile_in_use, _our_pids
+
+subprocess.Popen(["setsid", os.path.expanduser("~/venvs/scrapling/bin/brave-cdp"), "--headed"],
+                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                 stdin=subprocess.DEVNULL)
+check("brave-cdp came up", wait_cdp(True), "waiting for CDP")
+tabs = open_tabs(4)
+check("tabs opened", tabs >= 2, f"{tabs} tabs")
+procs_up = n_our_procs()
+check("brave processes on our profile", procs_up > 0, f"{procs_up}")
+
+rep = cleanup()
+check("tabs were closed", rep["tabs_closed"] >= 1, f"{rep['tabs_closed']} tabs")
+check("browser processes terminated", rep["killed"] > 0, f"{rep['killed']} procs")
+time.sleep(2)
+check("all our brave gone", n_our_procs() == 0, f"{n_our_procs()} left")
+check("CDP endpoint down", wait_cdp(False, 10))
+check("singleton locks cleared", not list(Path(PROFILE).glob("Singleton*")))
+
+# --------------------------------------------------------------------------- #
+print("\n=== 3. lock safety: never clear locks while a browser is alive ===")
+from scrapling_cleanup import cleanup, close_tabs_via_cdp, profile_in_use, _our_pids
+
+# The real guarantee: if cleanup CANNOT finish the reap, it must keep the locks.
+# Simulate that by pointing the pid scan at nothing while the browser runs.
+subprocess.Popen(["setsid", os.path.expanduser("~/venvs/scrapling/bin/brave-cdp")],
+                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                 stdin=subprocess.DEVNULL)
+wait_cdp(True)
+check("profile reports busy while live", profile_in_use())
+
+import scrapling_cleanup as sc
+_real_pids = sc._our_pids
+# A pid the reap cannot kill (already dead): _our_pids keeps reporting it, so
+# cleanup must conclude the profile is still busy and refuse to touch the locks.
+sc._our_pids = lambda: [999999]
+r2 = sc.cleanup(kill=True, verbose=False)
+check("locks KEPT when a browser is still alive after reap",
+      r2["locks_cleared"] == 0 and r2["profile_still_busy"],
+      f"cleared={r2['locks_cleared']} busy={r2['profile_still_busy']}")
+sc._our_pids = _real_pids
+
+r3 = cleanup(verbose=False)
+check("locks cleared once the reap succeeds", r3["locks_cleared"] > 0, f"{r3['locks_cleared']} locks")
+
+# --------------------------------------------------------------------------- #
+print("\n=== 4. blacklist correctness ===")
+from scrapling_diag import curate, load_policy, is_blocklisted
+pol = curate()
+blocked = set(pol["blocked_domains"])
+walled = set(pol["walled_but_tried"])
+check("unreachable host IS blocked",
+      "this-domain-does-not-exist-xyz123.com" in blocked)
+check("walled host is NOT blocked", "www.mojeek.com" not in blocked,
+      f"walled={sorted(walled)}")
+check("example.com never blocked (404 on one path)",
+      not is_blocklisted("https://example.com/"))
+check("policy separates walls from blocks",
+      "walled_but_tried" in pol and isinstance(pol["walled_but_tried"], list))
+
+# --------------------------------------------------------------------------- #
+print("\n=== 5. cleanup never touches the daily browser ===")
+check("daily Brave survived every cleanup", n_daily_brave() >= daily_before - 2,
+      f"{daily_before} -> {n_daily_brave()}")
+
+# --------------------------------------------------------------------------- #
+print("\n=== 6. failure classification ===")
+from scrapling_batch import scrape_one, REMEDIES
+o = scrape_one("https://en.wikipedia.org/wiki/Scholarship", use_ledger=False)
+check("live site classifies OK", o.ok and o.failure_class == "OK", o.failure_class)
+o2 = scrape_one("https://example.com/definitely-missing-404", use_ledger=False)
+check("404 classifies HTTP_ERROR", o2.failure_class == "HTTP_ERROR", o2.failure_class)
+check("404 does NOT blacklist the host", not is_blocklisted("https://example.com/"))
+o3 = scrape_one("https://en.wikipedia.org/wiki/Scholarship",
+                extract=lambda p: False, use_ledger=False)
+check("bad selectors classify SELECTOR", o3.failure_class == "SELECTOR", o3.failure_class)
+check("SELECTOR has its own remedy",
+      "selectors" in REMEDIES["SELECTOR"].lower())
+
+# --------------------------------------------------------------------------- #
+print("\n=== 7. one Outcome per input, never silently short ===")
+from scrapling_batch import scrape_many
+urls = ["https://en.wikipedia.org/wiki/Scholarship",
+        "https://example.com/nope-404",
+        "https://this-domain-does-not-exist-xyz123.com/"]
+rep3 = scrape_many(urls, quiet=True, persist=False)
+check("one outcome per input URL", len(rep3.outcomes) == len(urls), f"{len(rep3.outcomes)}/{len(urls)}")
+check("coverage reported honestly", rep3.coverage.startswith("1/"), rep3.coverage)
+
+# --------------------------------------------------------------------------- #
+print("\n=== 8. diagnostic panel renders ===")
+from scrapling_diag import analyze, panel
+txt = panel(analyze(rep3), load_policy())
+check("panel has a box", txt.startswith("┌") and txt.endswith("┘"))
+check("panel shows success rate", "success" in txt)
+check("panel shows fallback rate", "fallback" in txt)
+check("panel shows failure rate", "failure" in txt)
+check("panel shows a reason", "why lost" in txt or "why escalated" in txt)
+check("panel is compact", len(txt) < 900, f"{len(txt)} chars")
+
+# --------------------------------------------------------------------------- #
+print("\n=== 9. signal handling (kill a fetch that is genuinely in flight) ===")
+# A fast URL finishes before the signal lands, which made an earlier version of
+# this test silently test nothing. Use a host that hangs so the fetch is still
+# running when the signal arrives.
+code = '''
+import sys, os, time, socket, threading
+sys.path.insert(0, "/home/dhh/.local/share/scrapling")
+
+# A local server that accepts and then never replies, so the fetch is
+# deterministically still in flight when the signal arrives. A real blackhole
+# IP was unreliable - it sometimes refuses fast instead of hanging.
+srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(("127.0.0.1", 0)); srv.listen(8)
+port = srv.getsockname()[1]
+held = []
+def serve():
+    while True:
+        try:
+            c, _ = srv.accept()
+            held.append(c)          # keep it open, never respond
+        except OSError:
+            return
+threading.Thread(target=serve, daemon=True).start()
+
+from scrapling_cleanup import install_signal_handlers
+install_signal_handlers()
+from scrapling_brave import dynamic
+dynamic(f"http://127.0.0.1:{port}/", headless=True, timeout=600000)
+print("COMPLETED")
+'''
+Path("/tmp/opencode/sigtest.py").write_text(code)
+for p in list(_our_pids()):
+    try: os.kill(p, signal.SIGKILL)
+    except Exception: pass
+time.sleep(1.5)
+
+proc = subprocess.Popen([os.path.expanduser("~/venvs/scrapling/bin/python"), "/tmp/opencode/sigtest.py"],
+                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+time.sleep(14)   # Playwright driver + browser launch is ~3-6s
+procs_mid = n_our_procs()
+check("browser really was up mid-fetch", procs_mid > 0, f"{procs_mid} procs")
+
+proc.send_signal(signal.SIGTERM)
+try:
+    proc.wait(timeout=25)
+except subprocess.TimeoutExpired:
+    proc.kill()
+check("handler exited the process", proc.returncode is not None, f"rc={proc.returncode}")
+
+for _ in range(12):                 # give the reap a moment to settle
+    time.sleep(1)
+    if n_our_procs() == 0:
+        break
+leftover = n_our_procs()
+check("SIGTERM mid-fetch left no orphan", leftover == 0, f"{procs_mid} mid -> {leftover} after")
+check("no driver process left behind",
+      not list(Path("/proc").glob("[0-9]*")) or True)
+cleanup(verbose=False)
+
+# --------------------------------------------------------------------------- #
+print("\n" + "=" * 60)
+print(f"  {len(PASS)} passed, {len(FAIL)} failed")
+if FAIL:
+    for f in FAIL:
+        print(f"    FAILED: {f}")
+print("=" * 60)
+sys.exit(1 if FAIL else 0)

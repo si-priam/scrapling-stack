@@ -1,0 +1,163 @@
+#!/home/dhh/venvs/scrapling/bin/python
+"""Offline + live verification for the Brave-native Scrapling preset.
+
+V1  fingerprint diff vs your real Brave          (offline)
+V2  escalation logic on a saved wall page        (offline)
+V3  live challenge solve                         (network, optional)
+
+Run:  ~/venvs/scrapling/bin/verify-stealth
+"""
+
+from __future__ import annotations
+
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, "/home/dhh/.local/share/scrapling")
+
+from playwright.sync_api import sync_playwright  # noqa: E402
+from scrapling_brave import BRAVE_UA, fetch, dynamic, stealth, is_blocked  # noqa: E402
+
+CDP = "http://127.0.0.1:9222"
+FP_JS = """
+() => {
+  const c = document.createElement('canvas').getContext('webgl');
+  let webgl = 'none';
+  if (c) { const d = c.getExtension('WEBGL_debug_renderer_info');
+            webgl = d ? c.getParameter(d.UNMASKED_RENDERER_WEBGL) : 'hidden'; }
+  return {
+    ua: navigator.userAgent,
+    uaData: navigator.userAgentData
+      ? JSON.stringify(navigator.userAgentData.brands) : 'n/a',
+    brave: !!navigator.brave,
+    webgl: webgl,
+    h264: document.createElement('video').canPlayType('video/mp4; codecs="avc1.42E01E"') || 'NO',
+  };
+}
+"""
+
+WALLS = {
+    "turnstile cType": "<html><head><script>cType: 'managed'</script></head><body>Just a moment...</body></html>",
+    "cdn-cgi platform": '<html><body><script src="/cdn-cgi/challenge-platform/h/b/orchestrate"></script></body></html>',
+    "challenge sentence": "<html><body><h1>Checking your browser before accessing</h1></body></html>",
+    "cf_chl_opt": '<html><body><form id="cf_chl_opt"></form>Please enable cookies</body></html>',
+}
+
+
+def probe(page):
+    return page.evaluate(FP_JS)
+
+
+def hdr(title):
+    print(f"\n{'=' * 74}\n{title}\n{'=' * 74}")
+
+
+def v1():
+    hdr("V1  FINGERPRINT DIFF  (offline)")
+    rows = {}
+
+    try:
+        with sync_playwright() as p:
+            b = p.chromium.connect_over_cdp(CDP)
+            pg = b.contexts[0].new_page()
+            pg.goto("about:blank")
+            rows["your live Brave (CDP)"] = (probe(pg), None)
+            pg.close()
+            b.close()
+    except Exception as exc:
+        print(f"  ! live Brave unreachable on {CDP}: {exc}")
+        print("    start it with:  ~/venvs/scrapling/bin/brave-cdp --headed")
+
+    # Launch the same binary the way Scrapling does, headed vs headless, and
+    # read what the page itself would report to any bot-detection script.
+    from scrapling_brave import brave
+
+    launch_keys = ("executable_path", "args", "headless")
+    for label, headless in (("scrapling dynamic (headless)", True),
+                            ("scrapling stealth  (headed)", False)):
+        t0 = time.time()
+        try:
+            opts = {k: v for k, v in brave(headless=headless).items() if k in launch_keys}
+            with sync_playwright() as p:
+                b = p.chromium.launch(**opts)
+                pg = b.new_page()
+                pg.goto("about:blank")
+                rows[label] = (probe(pg), round(time.time() - t0, 2))
+                pg.close()
+                b.close()
+        except Exception as exc:
+            rows[label] = ({"ua": f"launch failed: {exc}", "uaData": "", "brave": "",
+                            "webgl": "", "h264": ""}, 0)
+
+    for label, (d, secs) in rows.items():
+        print(f"\n  {label}" + (f"   [{secs}s]" if secs else ""))
+        for k in ("ua", "uaData", "brave", "webgl", "h264"):
+            v = d.get(k, "")
+            if k == "ua" and isinstance(v, str):
+                v = v.replace("Mozilla/5.0 ", "")
+            print(f"    {k:8s}: {v}")
+        headless_tell = "HeadlessChrome" in str(d.get("ua", ""))
+        sw = "SwiftShader" in str(d.get("webgl", ""))
+        print(f"    -> headless tell: {'YES' if headless_tell else 'no ':3s} | "
+              f"software GPU: {'YES' if sw else 'no'}")
+
+    print(f"\n  UA string dynamic() now passes: {BRAVE_UA.replace('Mozilla/5.0 ', '')}")
+
+
+def v2():
+    hdr("V2  ESCALATION LOGIC  (offline)")
+    from scrapling.parser import Selector
+
+    ok = True
+    for name, html in WALLS.items():
+        page = Selector(content=html)
+        hit = is_blocked(page)
+        print(f"  {'DETECTED' if hit else 'MISSED  '}  {name}")
+        ok &= hit
+
+    clean = Selector(content="<html><body><h1>Real Article Title</h1>" + "<p>content</p>" * 400 + "</body></html>")
+    false_pos = is_blocked(clean)
+    print(f"  {'FALSE POSITIVE' if false_pos else 'clean page   '}  normal article (no false positive)")
+    ok &= not false_pos
+    print(f"\n  V2 {'PASS' if ok else 'FAIL'}")
+    return ok
+
+
+def v3():
+    hdr("V3  LIVE CHALLENGE SOLVE  (network)")
+    target = "https://nopecha.com/demo/cloudflare"
+    print(f"  target: {target}")
+    for label, fn in (("headless (tier 2)", lambda u: dynamic(u, headless=True)),
+                      ("headed   (tier 3)", lambda u: stealth(u, headless=False))):
+        t0 = time.time()
+        try:
+            page = fn(target)
+            secs = round(time.time() - t0, 1)
+            blocked = is_blocked(page)
+            print(f"  {label}: {'BLOCKED' if blocked else 'PASSED'} in {secs}s")
+        except Exception as exc:
+            print(f"  {label}: ERROR {type(exc).__name__}: {str(exc)[:90]}")
+
+
+def v_smoke():
+    hdr("TIER 1 SMOKE  (network)")
+    t0 = time.time()
+    try:
+        page = fetch("https://quotes.toscrape.com/")
+        quotes = page.css(".quote .text::text").getall()
+        print(f"  fetch(): {len(quotes)} quotes in {round(time.time()-t0,2)}s "
+              f"| blocked={is_blocked(page)}")
+    except Exception as exc:
+        print(f"  fetch() ERROR {type(exc).__name__}: {exc}")
+
+
+if __name__ == "__main__":
+    print("Brave-native Scrapling verification")
+    v2()
+    v_smoke()
+    if "--live" in sys.argv:
+        v1()
+        v3()
+    else:
+        print("\n(run with --live for V1 fingerprint diff + V3 live challenge)")

@@ -1,0 +1,92 @@
+#!/home/dhh/venvs/scrapling/bin/python
+"""scrape-batch - scrape many URLs, report every failure honestly.
+
+    ~/venvs/scrapling/bin/scrape-batch url1 url2 url3
+    cat urls.txt | ~/venvs/scrapling/bin/scrape-batch -
+    ~/venvs/scrapling/bin/scrape-batch --learn          # show what the ledger knows
+    ~/venvs/scrapling/bin/scrape-batch --learn --reset  # and forget it
+
+Exits non-zero if any URL failed, so it can gate a cron job or CI step.
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, "/home/dhh/.local/share/scrapling")
+
+from scrapling_batch import (  # noqa: E402
+    scrape_many, load_ledger, learned_notes, LEDGER, REMEDIES,
+)
+from scrapling_diag import analyze, panel, curate, load_policy  # noqa: E402
+
+
+def learn(reset=False):
+    if reset and LEDGER.exists():
+        LEDGER.unlink()
+        print("ledger cleared")
+        return 0
+    data = load_ledger()
+    hosts = data.get("hosts", {})
+    totals = data.get("totals", {})
+    print(f"LEDGER {LEDGER}")
+    print(f"  hosts seen : {len(hosts)}")
+    print("  outcomes   : " + (", ".join(f"{k}={v}" for k, v in sorted(totals.items())) or "(empty)"))
+    print()
+    if hosts:
+        print(f"  {'host':<32}{'ok':>4}{'fail':>6}{'tier':>6}  last class")
+        print("  " + "-" * 66)
+        for h, r in sorted(hosts.items(), key=lambda kv: -kv[1].get("fail", 0)):
+            print(f"  {h[:32]:<32}{r.get('ok',0):>4}{r.get('fail',0):>6}{r.get('min_tier',1):>6}  {r.get('last_class')}")
+    notes = learned_notes(data)
+    print()
+    if notes:
+        print("  LEARNED:")
+        for n in notes:
+            print(f"    - {n}")
+    else:
+        print("  (nothing learned yet - run a batch first)")
+    return 0
+
+
+def main():
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    flags = [a for a in sys.argv[1:] if a.startswith("-")]
+
+    if "--learn" in flags:
+        return learn("--reset" in flags)
+    if "--reset" in flags:
+        return learn(reset=True)
+
+    if not args:
+        print(__doc__)
+        return 2
+    if args == ["-"]:
+        urls = [l.strip() for l in sys.stdin if l.strip() and not l.startswith("#")]
+    elif Path(args[0]).exists():
+        urls = [l.strip() for l in Path(args[0]).read_text().splitlines()
+                if l.strip() and not l.startswith("#")]
+    else:
+        urls = args
+
+    print(f"Scraping {len(urls)} URL(s)\n")
+    report = scrape_many(urls)
+
+    # Curator step: fold this run's evidence into the learned policy, then dock
+    # the diagnostic panel to the bottom of the terminal.
+    policy = curate()
+    print()
+    print(panel(analyze(report), policy))
+    print()
+
+    print("=" * 66)
+    print(report.summary())
+    print("=" * 66)
+
+    if report.failures():
+        n_retry = sum(1 for o in report.failures() if o.retryable)
+        print(f"\n{n_retry} of {len(report.failures())} failures are retryable; "
+              f"the rest need a fix (see DIAGNOSTIC.md).")
+    return 1 if report.failures() else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

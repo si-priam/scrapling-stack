@@ -1,0 +1,108 @@
+#!/home/dhh/venvs/scrapling/bin/python
+"""scrapling-sync - keep the scraper's logins in step with your daily Brave.
+
+Your scraper runs on a share of your real Brave profile. Sign into a new site in
+your daily Brave and this makes the scraper see it, without copying the profile
+and without disturbing a scrape that is already running.
+
+  scrapling-sync              # catch up (does nothing if nothing changed)
+  scrapling-sync --force      # always do the work
+  scrapling-sync --mirror     # replace the credentials exactly, scraper's own cookies included
+  scrapling-sync --status     # what happened last, and can it run right now
+  scrapling-sync --json       # machine-readable
+
+Runs automatically: a background timer calls it every couple of minutes, and
+brave-cdp calls it just before it launches a browser. Both are no-ops when
+there is nothing new.
+
+Nothing here ever writes into your daily profile.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+
+sys.path.insert(0, "/home/dhh/.local/share/scrapling")
+
+from scrapling_sync import (  # noqa: E402
+    DAILY, SCRAPER, profile_in_use, state, sync_credentials,
+)
+
+
+def render(report: dict) -> str:
+    status = report.get("status", "error")
+    if status == "synced":
+        bits = []
+        if report.get("cookies_added"):
+            bits.append(f"+{report['cookies_added']} cookie(s)")
+        if report.get("touched"):
+            profiles = sorted({t.split("/")[0] for t in report["touched"]})
+            bits.append("from " + ", ".join(profiles))
+        line = f"profile sync: {' '.join(bits) or 'up to date'}"
+        if report.get("cookies_total"):
+            line += f"  [{report['cookies_total']} cookies total]"
+        if report.get("errors"):
+            line += "  (warnings: " + "; ".join(report["errors"]) + ")"
+        return line
+    if status == "unchanged":
+        return "profile sync: up to date, nothing changed in your daily Brave"
+    if status == "in-use":
+        return "profile sync: skipped, a scraper browser is running"
+    if status == "no-daily-profile":
+        return f"profile sync: skipped, daily profile not found at {DAILY}"
+    return f"profile sync: failed - {report.get('detail') or 'unknown error'}"
+
+
+def show_status() -> int:
+    last = state()
+    busy = profile_in_use()
+    print(f"daily profile   : {DAILY}")
+    print(f"scraper profile : {SCRAPER}")
+    print(f"scraper browser : {'running - sync will wait' if busy else 'idle'}")
+    if last:
+        print(f"last sync       : {last.get('last_sync', '?')}")
+        print(f"  detail        : {last.get('detail', '')}")
+        print(f"  cookies       : {last.get('cookies_total', '?')}")
+        print(f"  login sites   : {last.get('logins_sites', '?')}")
+    else:
+        print("last sync       : never recorded")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(
+        prog="scrapling-sync",
+        description="Sync the scraper profile's logins from your daily Brave.",
+    )
+    ap.add_argument("--force", action="store_true",
+                    help="sync even if the daily profile has not changed")
+    ap.add_argument("--mirror", action="store_true",
+                    help="replace credentials exactly instead of merging")
+    ap.add_argument("--status", action="store_true",
+                    help="show the last sync and whether one can run now")
+    ap.add_argument("--json", action="store_true", help="machine-readable output")
+    ap.add_argument("--quiet", action="store_true",
+                    help="print only when something actually changed")
+    args = ap.parse_args(argv)
+
+    if args.status:
+        return show_status()
+
+    report = sync_credentials(force=args.force, mirror=args.mirror)
+
+    if args.json:
+        print(json.dumps(report, indent=2))
+    elif not args.quiet:
+        print(render(report))
+    elif report["status"] == "synced" and (report["cookies_added"] or report["errors"]):
+        print(render(report))
+    elif report["status"] == "error":
+        print(render(report), file=sys.stderr)
+
+    return 1 if report["status"] == "error" and not report["touched"] else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

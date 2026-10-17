@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# Launch your existing Brave Nightly on the Scrapling profile copy, with a CDP port.
+# Scrapling attaches via cdp_url. No Chromium is ever downloaded.
+set -euo pipefail
+
+BRAVE_BIN="/opt/brave.com/brave-nightly/brave"
+PYBIN="/home/dhh/venvs/scrapling/bin/python"
+PROFILE_DIR="${BRAVE_PROFILE_DIR:-$HOME/.local/share/scrapling/brave-profile}"
+PROFILE="${BRAVE_PROFILE:-Default}"
+PORT="${BRAVE_CDP_PORT:-9222}"
+
+usage() {
+  cat <<EOF
+brave-cdp - run your Brave for Scrapling (CDP on localhost)
+
+  brave-cdp                      # headless, Default profile, port 9222
+  brave-cdp --headed             # visible window (use when a Cloudflare wall appears)
+  brave-cdp --profile "Profile 2"
+  brave-cdp --port 9333
+  brave-cdp --stop
+
+Env overrides: BRAVE_PROFILE_DIR, BRAVE_PROFILE, BRAVE_CDP_PORT
+EOF
+}
+
+HEADLESS="--headless=new"
+case "${1:-}" in
+  --headed) HEADLESS=""; shift ;;
+  --headless) shift ;;
+esac
+
+PROFILE_NAME="$PROFILE"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --profile) PROFILE_NAME="$2"; shift 2 ;;
+    --port)    PORT="$2"; shift 2 ;;
+    --stop)
+      pkill -f "remote-debugging-port=$PORT.*brave-profile" 2>/dev/null || true
+      pkill -f "$PORT.*$PROFILE_DIR" 2>/dev/null || true
+      echo "stopped (port $PORT)"
+      exit 0 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown option: $1"; usage; exit 1 ;;
+  esac
+done
+
+if [ ! -x "$BRAVE_BIN" ]; then
+  echo "Brave not found at $BRAVE_BIN" >&2
+  exit 1
+fi
+if [ ! -d "$PROFILE_DIR/$PROFILE_NAME" ]; then
+  echo "profile '$PROFILE_NAME' not found in $PROFILE_DIR" >&2
+  echo "available:" >&2
+  ls -1 "$PROFILE_DIR" | sed 's/^/  /' >&2
+  exit 1
+fi
+
+# The keyring (gnome-libsecret) is where your cookie encryption key lives.
+# It is keyed to the USER, not to the profile path, so a copied profile still decrypts.
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+
+# Clear stale profile locks in OUR copy only, and only when no Brave of ours is
+# running. The copy was rsynced while your real Brave was live, so it inherited
+# a SingletonLock that belongs to a process we do not own.
+if ! pgrep -f "user-data-dir=$PROFILE_DIR" >/dev/null 2>&1; then
+  rm -f "$PROFILE_DIR/SingletonLock" \
+        "$PROFILE_DIR/SingletonCookie" \
+        "$PROFILE_DIR/SingletonSocket" 2>/dev/null || true
+
+  # Catch up with any logins you have added or changed in your daily Brave since
+  # the last check. Merge only, so a cf_clearance the scraper solved for itself
+  # is never thrown away. No-op when your daily profile has not changed.
+  "$PYBIN" - <<'SYNCEOF' || true
+import sys
+sys.path.insert(0, "/home/dhh/.local/share/scrapling")
+from scrapling_sync import sync_credentials
+r = sync_credentials()
+if r["status"] == "synced" and r["cookies_added"]:
+    print(f"profile sync: +{r['cookies_added']} cookie(s) from your daily Brave", file=sys.stderr)
+elif r["status"] == "error":
+    print(f"profile sync: warning - {r['detail']}", file=sys.stderr)
+SYNCEOF
+
+  # Never restore stale tabs. Brave restores the previous session when it thinks
+  # it crashed, which is exactly what a copied/killed profile looks like.
+  if [ -n "${BRAVE_KEEP_TABS:-}" ]; then
+    echo "note: BRAVE_KEEP_TABS set - skipping session reset" >&2
+  else
+    "$PYBIN" - "$PROFILE_DIR" "$PROFILE_NAME" <<'EOF' || true
+import sys, os
+sys.path.insert(0, "/home/dhh/.local/share/scrapling")
+from scrapling_cleanup import reset_session, profile_in_use
+if not profile_in_use():
+    r = reset_session(sys.argv[1], (sys.argv[2],))
+    if r["tabs_cleared"] or r["prefs_fixed"]:
+        print(f"session reset: {r['tabs_cleared']} stale tab file(s) cleared, "
+              f"{r['prefs_fixed']} profile(s) marked clean", file=sys.stderr)
+EOF
+  fi
+fi
+
+
+
+# Launch on the scraper workspace (default 5), then hand your view back.
+# The browser window stays on that workspace; you stay where you were.
+exec "$BRAVE_BIN" \
+  --remote-debugging-port="$PORT" \
+  --remote-debugging-address=127.0.0.1 \
+  --user-data-dir="$PROFILE_DIR" \
+  --profile-directory="$PROFILE_NAME" \
+  --password-store=gnome-libsecret \
+  --no-first-run \
+  --no-default-browser-check \
+  --disable-session-crashed-bubble \
+  --hide-crash-restore-bubble \
+  --disable-features=Translate \
+  $HEADLESS \
+  about:blank

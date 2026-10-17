@@ -1,0 +1,23 @@
+#!/home/dhh/venvs/scrapling/bin/python
+"""brave-cleanup - close tabs, then the browser, then reap orphans.
+
+    ~/venvs/scrapling/bin/brave-cleanup            # full ordered shutdown
+    ~/venvs/scrapling/bin/brave-cleanup --status   # show what is running
+
+Only ever touches Brave instances using the Scrapling profile copy.
+Your daily Brave is never signalled.
+"""
+import sys
+sys.path.insert(0, "/home/dhh/.local/share/scrapling")
+from scrapling_cleanup import cleanup, _our_pids, profile_in_use
+
+if "--status" in sys.argv:
+    pids = _our_pids()
+    print(f"scrapling-profile brave processes : {len(pids)}")
+    print(f"profile in use                    : {profile_in_use()}")
+    for p in pids[:10]:
+        print(f"  pid {p}")
+    sys.exit(0)
+
+r = cleanup()
+sys.exit(1 if r["profile_still_busy"] else 0)
