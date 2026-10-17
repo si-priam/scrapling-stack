@@ -52,9 +52,21 @@ step "Preflight"
 
 [[ -d "$HOME" ]] || die "no home directory"
 
-command -v uv >/dev/null 2>&1 \
-  || die "uv is missing. Install it first (Omarchy: mise use -g uv@latest) and re-run."
-ok "uv $(uv --version 2>/dev/null | awk '{print $2}')"
+# Find a Python 3.13. Prefer uv if it is on the machine, but the system's own
+# python3.13 is just as good. Nothing is fetched: if neither exists, that is a
+# problem to report, not to solve by installing things.
+HAVE_UV=0
+PY313=""
+if command -v uv >/dev/null 2>&1 && PY313="$(uv python find 3.13 2>/dev/null)" && [[ -n "$PY313" ]]; then
+  HAVE_UV=1
+  ok "uv $(uv --version 2>/dev/null | awk '{print $2}')"
+  ok "Python 3.13 found: $PY313"
+elif command -v python3.13 >/dev/null 2>&1; then
+  PY313="$(command -v python3.13)"
+  ok "Python 3.13 found: $PY313"
+else
+  die "no Python 3.13 on this machine (and no uv to provide one). Install Python 3.13, then re-run."
+fi
 
 [[ -x "$BRAVE_BIN" ]] \
   || die "Brave Nightly is missing at $BRAVE_BIN. Install it first (yay -S brave-nightly-bin) and re-run."
@@ -119,21 +131,24 @@ ok "commands in $VENV/bin"
 [[ -f "$SHARE/policy.json" ]] || install -m 0644 "$HERE/modules/policy.example.json" "$SHARE/policy.json"
 
 # --------------------------------------------------------------------------
-# 3. Python 3.13 + the pinned stack.
+# 3. The Python environment.
 # --------------------------------------------------------------------------
-step "Python stack"
+step "Python environment"
 
-# 3.13 deliberately: curl_cffi 0.16.3 publishes no cp314 wheel, so the system's
-# 3.14 would try to build it from source and pull in a Rust toolchain.
-# Nothing is installed system-wide: uv keeps any interpreter it fetches inside
-# its own private store, and reuses one that is already on the machine.
-if existing_py="$(uv python find 3.13 2>/dev/null)"; then
-  ok "Python 3.13 is already on this machine - nothing fetched"
-  log "   $existing_py"
-else
-  log "fetching a private Python 3.13 into uv's own store (your system Python is not touched)"
-  uv python install 3.13 >/dev/null
-fi
+# 3.13 deliberately: curl_cffi 0.16.3 publishes no cp314 wheel, so a 3.14 would
+# try to build it from source and pull in a Rust toolchain.
+#
+# uv is used when it is on the machine because it is quicker, but it is not
+# required: the system's own python3.13 builds the same environment. Nothing is
+# installed system-wide either way. Everything lives under $HOME.
+install_stack() {
+  if [[ "$HAVE_UV" == "1" ]]; then
+    uv pip install --python "$VENV/bin/python" "$SCRAPLING_PIN"
+  else
+    "$VENV/bin/python" -m pip install --upgrade pip >/dev/null 2>&1 || true
+    "$VENV/bin/python" -m pip install "$SCRAPLING_PIN"
+  fi
+}
 
 if [[ -x "$VENV/bin/python" ]]; then
   ok "environment exists ($("$VENV/bin/python" --version 2>&1))"
@@ -141,13 +156,17 @@ if [[ -x "$VENV/bin/python" ]]; then
     ok "scrapling already installed; leaving it alone"
   else
     log "installing $SCRAPLING_PIN"
-    uv pip install --python "$VENV/bin/python" "$SCRAPLING_PIN"
+    install_stack
   fi
 else
   log "creating $VENV on Python 3.13"
-  uv venv "$VENV" --python 3.13
+  if [[ "$HAVE_UV" == "1" ]]; then
+    uv venv "$VENV" --python 3.13
+  else
+    "$PY313" -m venv "$VENV"
+  fi
   log "installing $SCRAPLING_PIN"
-  uv pip install --python "$VENV/bin/python" "$SCRAPLING_PIN"
+  install_stack
 fi
 
 "$VENV/bin/python" - <<'PY' || die "the Python stack did not import cleanly"

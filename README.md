@@ -53,8 +53,14 @@ column.
 
 ## Requirements
 
-Omarchy/Arch on x86_64 with a graphical session, Brave Nightly
+Omarchy/Arch on x86_64 with a graphical session, **Brave Nightly**
 (`yay -S brave-nightly-bin`, landing at `/opt/brave.com/brave-nightly/brave`),
-`uv`, and a running `gnome-keyring`. `install.sh` checks all of it and stops
-with a clear message if something is missing. Python 3.13 comes from `uv`; you
-install nothing.
+**Python 3.13**, and a running **gnome-keyring**.
+
+That is the whole list. `install.sh` checks each one and stops with a clear
+message if something is missing — it does not install anything for you.
+`uv` is used if it happens to be present, but it is not required; the system's
+own `python3.13` builds the same environment.
+
+Node.js is not needed either: the browser drivers that come with Scrapling carry
+their own copy.
