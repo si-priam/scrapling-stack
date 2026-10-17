@@ -125,7 +125,15 @@ step "Python stack"
 
 # 3.13 deliberately: curl_cffi 0.16.3 publishes no cp314 wheel, so the system's
 # 3.14 would try to build it from source and pull in a Rust toolchain.
-uv python install 3.13 >/dev/null 2>&1 || true
+# Nothing is installed system-wide: uv keeps any interpreter it fetches inside
+# its own private store, and reuses one that is already on the machine.
+if existing_py="$(uv python find 3.13 2>/dev/null)"; then
+  ok "Python 3.13 is already on this machine - nothing fetched"
+  log "   $existing_py"
+else
+  log "fetching a private Python 3.13 into uv's own store (your system Python is not touched)"
+  uv python install 3.13 >/dev/null
+fi
 
 if [[ -x "$VENV/bin/python" ]]; then
   ok "environment exists ($("$VENV/bin/python" --version 2>&1))"
