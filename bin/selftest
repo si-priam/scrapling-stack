@@ -4,9 +4,11 @@
     ~/venvs/scrapling/bin/selftest
 """
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -207,13 +209,15 @@ from scrapling_brave import dynamic
 dynamic(f"http://127.0.0.1:{port}/", headless=True, timeout=600000)
 print("COMPLETED")
 '''
-Path("/tmp/opencode/sigtest.py").write_text(code)
+_sigdir = Path(tempfile.mkdtemp(prefix="scrapling-selftest-"))
+_sigfile = _sigdir / "sigtest.py"
+_sigfile.write_text(code)
 for p in list(_our_pids()):
     try: os.kill(p, signal.SIGKILL)
     except Exception: pass
 time.sleep(1.5)
 
-proc = subprocess.Popen([os.path.expanduser("~/venvs/scrapling/bin/python"), "/tmp/opencode/sigtest.py"],
+proc = subprocess.Popen([os.path.expanduser("~/venvs/scrapling/bin/python"), str(_sigfile)],
                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
 time.sleep(14)   # Playwright driver + browser launch is ~3-6s
 procs_mid = n_our_procs()
@@ -235,6 +239,7 @@ check("SIGTERM mid-fetch left no orphan", leftover == 0, f"{procs_mid} mid -> {l
 check("no driver process left behind",
       not list(Path("/proc").glob("[0-9]*")) or True)
 cleanup(verbose=False)
+shutil.rmtree(_sigdir, ignore_errors=True)
 
 # --------------------------------------------------------------------------- #
 print("\n" + "=" * 60)

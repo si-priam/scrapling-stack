@@ -13,6 +13,8 @@ up identically instead of being reverse-engineered from memory.
 | Path | What it is |
 |---|---|
 | `install.sh` | the whole bring-up. Idempotent, safe to re-run. |
+| `PROMPT.md` | the full prompt to paste on the new machine: every step, every check, and what to do when something fails |
+| `PROMPT-short.md` | a six-line version of the same thing, for when you just want it done |
 | `modules/` | the working code: three-tier cascade, bot-wall detector, batch runner, cleanup, login sync, and `DIAGNOSTIC.md` (the measured pass/fail record) |
 | `bin/` | the commands you drive by hand |
 | `systemd/` | the two-minute login sync |
