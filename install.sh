@@ -26,6 +26,7 @@ BRAVE_BIN="/opt/brave.com/brave-nightly/brave"
 # which is why the hidden-browser tier in modules/scrapling_brave.py runs the
 # stealth engine. Every dependency has a wheel, so nothing is built from source.
 SCRAPLING_PIN="scrapling[all]==0.5"
+PINNED_VERSION="${SCRAPLING_PIN##*==}"
 VENV="$HOME/venvs/scrapling"
 SHARE="$HOME/.local/share/scrapling"
 PROFILE="$SHARE/brave-profile"
@@ -49,6 +50,21 @@ step() { printf '\n== %s\n' "$*"; }
 ok()   { printf '  ok   %s\n' "$*"; }
 warn() { printf '  warn %s\n' "$*" >&2; }
 die()  { printf '  FAIL %s\n' "$*" >&2; exit 1; }
+
+# Is the owner's daily Brave actually running? Check the process itself rather
+# than any command line that merely mentions the profile path -- a shell, or an
+# agent part-way through a command, can match that string and must never be
+# mistaken for the browser.
+daily_brave_running() {
+  local p exe
+  for p in $(pgrep -f "$DAILY_PROFILE" 2>/dev/null || true); do
+    exe="$(readlink -f "/proc/$p/exe" 2>/dev/null || true)"
+    case "$exe" in
+      "$BRAVE_BIN"|*/brave-nightly/*) return 0 ;;
+    esac
+  done
+  return 1
+}
 
 # --------------------------------------------------------------------------
 # 1. Preflight. Stop rather than improvise.
@@ -134,10 +150,17 @@ install_stack() {
 
 if [[ -x "$VENV/bin/python" ]]; then
   ok "environment exists ($("$VENV/bin/python" --version 2>&1))"
-  if "$VENV/bin/python" -c 'import scrapling' 2>/dev/null; then
-    ok "scrapling already installed; leaving it alone"
+  # Compare against the pin rather than just "does it import": an environment
+  # left on an older Scrapling imports fine and then fails at the first scrape.
+  HAVE="$("$VENV/bin/python" -c 'import importlib.metadata as m; print(m.version("scrapling"))' 2>/dev/null || true)"
+  if [[ "$HAVE" == "$PINNED_VERSION" ]]; then
+    ok "scrapling $HAVE already installed; leaving it alone"
   else
-    log "installing $SCRAPLING_PIN"
+    if [[ -n "$HAVE" ]]; then
+      log "scrapling $HAVE is installed but $PINNED_VERSION is pinned; changing it"
+    else
+      log "installing $SCRAPLING_PIN"
+    fi
     install_stack
   fi
 else
@@ -180,6 +203,14 @@ done
 install -m 0644 "$HERE/modules/DIAGNOSTIC.md" "$SHARE/DIAGNOSTIC.md"
 ok "modules in $SHARE"
 
+# The modules use Scrapling's own API, so import them now. A Scrapling release
+# that changed that API is then caught here with a plain error, instead of at
+# the first scrape.
+( cd "$SHARE" && "$VENV/bin/python" -c \
+  'import scrapling_brave, scrapling_batch, scrapling_cleanup, scrapling_diag, scrapling_sync' ) \
+  || die "the scraper's own code did not load against scrapling $PINNED_VERSION (see the error above)"
+ok "modules load against scrapling $PINNED_VERSION"
+
 for f in "$HERE"/bin/*; do
   install -m 0755 "$f" "$VENV/bin/$(basename "$f")"
   rewrite "$VENV/bin/$(basename "$f")"
@@ -215,7 +246,7 @@ dedupe_node
 # --------------------------------------------------------------------------
 step "Scraper profile"
 
-if pgrep -f "$DAILY_PROFILE" >/dev/null 2>&1; then
+if daily_brave_running; then
   die "your daily Brave is running. Close it, then re-run (the profile must not be mid-write)."
 fi
 
@@ -286,8 +317,16 @@ PY
 # --------------------------------------------------------------------------
 if [[ "$VERIFY" == "1" ]]; then
   step "Verification"
-  log "self-test"
-  "$VENV/bin/selftest" || warn "selftest reported a problem (see above)"
+  # The self-test compares the scraper's browser against the owner's running one
+  # and checks that it is never touched, so it cannot run while Brave is closed.
+  # Say that plainly rather than reporting a failure that is not one.
+  if daily_brave_running; then
+    log "self-test"
+    "$VENV/bin/selftest" || warn "selftest reported a problem (see above)"
+  else
+    log "self-test skipped: it needs your daily Brave open"
+    printf '       Open Brave Nightly, then run: %s/bin/selftest\n' "$VENV"
+  fi
   log "stealth check"
   "$VENV/bin/verify-stealth" | tail -20 || warn "verify-stealth reported a problem (see above)"
   step "Done"

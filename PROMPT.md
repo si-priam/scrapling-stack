@@ -186,13 +186,13 @@ So you can follow along and know which part failed if something does.
 | # | Stage | What happens |
 |---|---|---|
 | 1 | **Preflight** | checks every requirement in §2 that matters. Changes nothing. Stops with one plain sentence if something is missing. |
-| 2 | **Python environment** | creates `~/venvs/scrapling` using the Python 3.15 already on the machine, then installs Scrapling pinned to `0.5`. Uses `uv` when it is present, otherwise the system's own `python3.15`; both build the same environment. Nothing system-wide. |
+| 2 | **Python environment** | creates `~/venvs/scrapling` using the Python 3.15 already on the machine, then installs Scrapling pinned to `0.5` — and corrects the environment if it is on a different version. Uses `uv` when it is present, otherwise the system's own `python3.15`; both build the same environment. Nothing system-wide. |
 | 3 | **Placing the files** | the scraper code goes to `~/.local/share/scrapling/`, the commands to `~/venvs/scrapling/bin/`, plus the measured results file and a small policy file. |
 | 4 | **Reclaiming space** | Playwright and Patchright each ship an identical 127 MB copy of Node.js. On a btrfs disk they are made to share one copy. On other filesystems they are left as they are. |
 | 5 | **Profile share** | the scraper gets a **share** of the Brave profile, not a copy — on btrfs. On other filesystems it falls back to a real copy (about 250 MB) and says so. |
 | 6 | **Login sync** | a background job, running as you, wakes every two minutes and carries new sign-ins from the daily Brave to the scraper. It does nothing when nothing changed. |
 | 7 | **OpenCode** | adds one entry to `~/.config/opencode/opencode.jsonc` so the Scrapling tools appear in OpenCode. Your other settings are kept; note that comments and exact formatting in that file are not preserved. |
-| 8 | **Verification** | runs `selftest` and `verify-stealth`, and prints the results. |
+| 8 | **Verification** | runs `verify-stealth`, and runs `selftest` too when the daily Brave is open — otherwise it says the self-test was skipped and leaves it to §7.1. |
 
 ---
 

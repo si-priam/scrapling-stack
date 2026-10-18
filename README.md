@@ -18,7 +18,7 @@ up identically instead of being reverse-engineered from memory.
 | `modules/` | the working code: three-tier cascade, bot-wall detector, batch runner, cleanup, login sync, and `DIAGNOSTIC.md` (the measured pass/fail record) |
 | `bin/` | the commands you drive by hand |
 | `systemd/` | the two-minute login sync |
-| `opencode.snippet.jsonc` | the OpenCode server entry `install.sh` merges for you |
+| `opencode.snippet.jsonc` | the OpenCode server entry, for reference. `install.sh` writes the same entry itself, with this machine's own paths |
 
 ## The commands
 
