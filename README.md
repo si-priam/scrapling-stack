@@ -41,6 +41,10 @@ All of them live in `~/venvs/scrapling/bin/`.
 ./install.sh             # install, then verify
 ```
 
+On a new machine, open Brave Nightly once and sign in to your sites before that
+first install: the scraper's copy of the profile is taken from it, and sign-ins
+never travel between machines.
+
 ## The one thing to know
 
 Your daily Brave and the scraper share the same profile blocks on disk. Writes

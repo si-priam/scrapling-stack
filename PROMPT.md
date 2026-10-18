@@ -15,6 +15,9 @@ downloading a second browser and without disturbing the Brave you use daily.
 If you only read one part, read this:
 
 ```bash
+# 0. First: open Brave Nightly on this machine, sign in to the sites you scrape,
+#    then close it. Sign-ins never travel between machines.
+
 # 1. Read the instructions first — the commands below change the machine
 git clone https://github.com/si-priam/scrapling-stack
 cd scrapling-stack
