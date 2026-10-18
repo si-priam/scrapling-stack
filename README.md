@@ -87,16 +87,20 @@ opens no browser at all.
 
 Omarchy/Arch on x86_64 with a graphical session, **Brave Nightly**
 (`yay -S brave-nightly-bin`, landing at `/opt/brave.com/brave-nightly/brave`),
-**Python 3.15**, and a running **gnome-keyring**.
+the **system Python** (3.10 or newer — Arch ships it), and a running
+**gnome-keyring**.
 
 That is the whole list. `install.sh` checks each one and stops with a clear
 message if something is missing — it does not install anything for you.
 
 **uv is preferred; pip does the same job.** `uv` creates the environment and
-installs the packages when it is present, and the system's own `python3.15 -m
-pip` builds an identical environment when it is not. Neither needs anything
-system-wide. Python 3.15 is deliberate: Scrapling 0.5 needs 3.10 or newer, and
-on 3.15 every dependency resolves to a ready-made wheel, so nothing is compiled.
+installs the packages when it is present, and the system's own `pip` builds an
+identical environment when it is not. Neither needs anything system-wide.
+
+The machine's own Python is deliberate: it is the one your distribution keeps
+current, so no version number here can go stale when the system moves forward.
+Scrapling 0.5 needs 3.10 or newer, and every dependency resolves to a ready-made
+wheel, so nothing is compiled.
 
 Node.js is not needed either: the browser drivers that come with Scrapling carry
 their own copy.

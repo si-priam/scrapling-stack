@@ -81,17 +81,17 @@ the ones that matter and reports what it finds.
 | Requirement | Notes |
 |---|---|
 | Omarchy / Arch Linux on x86_64, with a graphical desktop session | the scraper's visible mode needs a real display |
-| **Python 3.15** | system-wide, or on `PATH`; `uv` may provide it instead |
+| **Python 3.10 or newer** | the machine's own system Python — Arch ships it, nothing to add |
 | **Brave Nightly** at `/opt/brave.com/brave-nightly/brave` | the only browser used |
 | Brave Nightly **opened at least once** and signed in | sign-ins do not travel between machines; they must exist on this machine |
 | `gnome-keyring` running | this is what decrypts the saved logins |
 | `git` and internet access | to fetch this setup and the Python packages |
 | Node.js | **not needed.** See §10. Install or ignore it as you wish. |
 
-What `--check` actually tests: the home directory, Python 3.15 (or `uv`), Brave
-Nightly, whether the keyring is running, whether a systemd user session exists,
-and whether a daily Brave profile exists. It does **not** test Node.js, `git`,
-your CPU, or the network.
+What `--check` actually tests: the home directory, the system Python (3.10 or
+newer), Brave Nightly, whether the keyring is running, whether a systemd user
+session exists, and whether a daily Brave profile exists. It does **not** test
+Node.js, `git`, your CPU, or the network.
 
 ---
 
@@ -189,7 +189,7 @@ So you can follow along and know which part failed if something does.
 | # | Stage | What happens |
 |---|---|---|
 | 1 | **Preflight** | checks every requirement in §2 that matters. Changes nothing. Stops with one plain sentence if something is missing. |
-| 2 | **Python environment** | creates `~/venvs/scrapling` using the Python 3.15 already on the machine, then installs Scrapling pinned to `0.5` — and corrects the environment if it is on a different version. Uses `uv` when it is present, otherwise the system's own `python3.15`; both build the same environment. Nothing system-wide. |
+| 2 | **Python environment** | creates `~/venvs/scrapling` using the system Python already on the machine, then installs Scrapling pinned to `0.5`. An environment left on a Python the machine no longer has is rebuilt. Uses `uv` when it is present, otherwise the system's own `pip`; both build the same environment. Nothing system-wide. |
 | 3 | **Placing the files** | the scraper code goes to `~/.local/share/scrapling/`, the commands to `~/venvs/scrapling/bin/`, plus the measured results file and a small policy file. |
 | 4 | **Reclaiming space** | Playwright and Patchright each ship an identical 127 MB copy of Node.js. On a btrfs disk they are made to share one copy. On other filesystems they are left as they are. |
 | 5 | **Profile share** | the scraper gets a **share** of the Brave profile, not a copy — on btrfs. On other filesystems it falls back to a real copy (about 250 MB) and says so. |
@@ -289,7 +289,7 @@ Result: success / failed at step N
 
 | Check                            | Result |
 |----------------------------------|--------|
-| Python 3.15 found                |        |
+| System Python found (3.10+)      |        |
 | Brave Nightly found              |        |
 | Scrapling installed              |        |
 | Login sync timer active          |        |
@@ -316,7 +316,7 @@ Rules for the report:
 
 | What you see | What it means | What to do |
 |---|---|---|
-| `no Python 3.15 on this machine` | Python 3.15 is genuinely absent | stop and report; do not install it |
+| `no Python 3.10 or newer on this machine` | the system Python is missing or too old | stop and report; do not install one |
 | `Brave Nightly is missing at ...` | Brave is not where it is expected | stop and report |
 | `your daily Brave is running` | Brave is open, so the profile cannot be captured safely | close Brave, run again |
 | `gnome-keyring-daemon is not running in this session` | a warning, not a stop: logins cannot be decrypted until it runs | report it; a fresh graphical session usually fixes it |
@@ -399,7 +399,7 @@ time, never again.
 
 It is finished when all of these are true:
 
-- Scrapling is installed for Python 3.15 at `~/venvs/scrapling`, pinned to `0.5`
+- Scrapling is installed on the system Python at `~/venvs/scrapling`, pinned to `0.5`
 - The commands in §10 are present and runnable
 - The scraper works in a share of the Brave profile, and its logins decrypt
 - `scrapling-sync.timer` is `active`, and `scrapling-sync --status` reports cookies and login sites

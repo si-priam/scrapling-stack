@@ -73,26 +73,33 @@ step "Preflight"
 
 [[ -d "$HOME" ]] || die "no home directory"
 
-# Find Python 3.15. uv is preferred when it is on the machine -- it resolves
-# interpreters cleanly -- but the system's own python3.15 is just as good.
-# 3.15 deliberately: Scrapling 0.5 needs 3.10 or newer, and on 3.15 every
-# dependency resolves to a wheel, so nothing is compiled.
+# Use the Python this machine already has -- the system's own -- so the stack
+# needs no interpreter of its own, and nothing here pins a version number that
+# can go stale when the distribution moves forward. Scrapling 0.5 needs 3.10 or
+# newer, and every one of its dependencies ships a wheel, so nothing is compiled.
 #
-# Nothing is installed either way: if no 3.15 exists here, that is a problem to
-# report, not to solve by installing things.
-PYVER="3.15"
+# Nothing is installed either way: if no suitable Python exists here, that is a
+# problem to report, not to solve by installing things.
 HAVE_UV=0
-PY313=""
-if command -v uv >/dev/null 2>&1 && PY313="$(uv python find "$PYVER" 2>/dev/null)" && [[ -n "$PY313" ]]; then
+if command -v uv >/dev/null 2>&1; then
   HAVE_UV=1
   ok "uv $(uv --version 2>/dev/null | awk '{print $2}')"
-  ok "Python $PYVER found: $PY313"
-elif command -v "python$PYVER" >/dev/null 2>&1; then
-  PY313="$(command -v "python$PYVER")"
-  ok "Python $PYVER found: $PY313"
-else
-  die "no Python $PYVER on this machine (and no uv to provide one). Install Python $PYVER, then re-run."
 fi
+
+PY=""
+for candidate in /usr/bin/python3 \
+                 "$(command -v python3 2>/dev/null || true)" \
+                 "$( { command -v uv >/dev/null 2>&1 && uv python find 3 2>/dev/null; } || true )"; do
+  [[ -n "$candidate" && -x "$candidate" ]] || continue
+  if "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3, 10) else 1)' 2>/dev/null; then
+    PY="$candidate"
+    break
+  fi
+done
+[[ -n "$PY" ]] \
+  || die "no Python 3.10 or newer on this machine. Install your distribution's Python, then re-run."
+PYVER="$("$PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+ok "Python $PYVER found: $(readlink -f "$PY")"
 
 [[ -x "$BRAVE_BIN" ]] \
   || die "Brave Nightly is missing at $BRAVE_BIN. Install it first (yay -S brave-nightly-bin) and re-run."
@@ -134,9 +141,9 @@ step "Python environment"
 # environment. pip is the fallback and builds exactly the same environment --
 # uv is a preference here, not a requirement.
 #
-# 3.15 deliberately: Scrapling 0.5 needs 3.10 or newer, and on 3.15 every
-# dependency resolves to a wheel (curl-cffi ships an abi3 wheel covering 3.10 to
-# 3.15), so there is no source build and no Rust toolchain.
+# The system Python deliberately: it is the one the distribution keeps current,
+# so no version number here goes stale. Scrapling 0.5 needs 3.10 or newer and
+# every dependency ships a wheel, so there is no source build and no toolchain.
 #
 # Nothing is installed system-wide either way. Everything lives under $HOME.
 install_stack() {
@@ -148,8 +155,14 @@ install_stack() {
   fi
 }
 
-if [[ -x "$VENV/bin/python" ]]; then
-  ok "environment exists ($("$VENV/bin/python" --version 2>&1))"
+# The environment has to be built on the interpreter chosen above. One left on a
+# Python this machine no longer has -- after the distribution upgrades it, say --
+# is rebuilt here, so that upgrade needs no manual cleanup.
+VENV_PY="$(readlink -f "$VENV/bin/python" 2>/dev/null || true)"
+WANT_PY="$(readlink -f "$PY")"
+
+if [[ -x "$VENV/bin/python" && "$VENV_PY" == "$WANT_PY" ]]; then
+  ok "environment exists on Python $PYVER ($VENV_PY)"
   # Compare against the pin rather than just "does it import": an environment
   # left on an older Scrapling imports fine and then fails at the first scrape.
   HAVE="$("$VENV/bin/python" -c 'import importlib.metadata as m; print(m.version("scrapling"))' 2>/dev/null || true)"
@@ -164,11 +177,15 @@ if [[ -x "$VENV/bin/python" ]]; then
     install_stack
   fi
 else
-  log "creating $VENV on Python $PYVER"
-  if [[ "$HAVE_UV" == "1" ]]; then
-    uv venv "$VENV" --python "$PYVER"
+  if [[ -e "$VENV" ]]; then
+    log "rebuilding $VENV on Python $PYVER (it was built on a different interpreter)"
   else
-    "$PY313" -m venv "$VENV"
+    log "creating $VENV on Python $PYVER"
+  fi
+  if [[ "$HAVE_UV" == "1" ]]; then
+    uv venv "$VENV" --python "$PY" --clear
+  else
+    "$PY" -m venv --clear "$VENV"
   fi
   log "installing $SCRAPLING_PIN"
   install_stack
@@ -246,13 +263,15 @@ dedupe_node
 # --------------------------------------------------------------------------
 step "Scraper profile"
 
-if daily_brave_running; then
-  die "your daily Brave is running. Close it, then re-run (the profile must not be mid-write)."
-fi
-
 if [[ -d "$PROFILE" && -f "$PROFILE/Default/Cookies" ]]; then
   ok "scraper profile already present"
 else
+  # The share is taken once. It must not be taken from a profile that is being
+  # written to, so the running-Brave check belongs here rather than above: a
+  # later re-run -- after the system's Python moves, say -- needs no Brave at all.
+  if daily_brave_running; then
+    die "your daily Brave is running. Close it, then re-run (the profile must not be mid-write)."
+  fi
   [[ -d "$DAILY_PROFILE" ]] || die "no daily Brave profile to share yet. Launch Brave Nightly once and re-run."
   mkdir -p "$SHARE"
   rm -rf "$PROFILE"
