@@ -81,16 +81,16 @@ the ones that matter and reports what it finds.
 | Requirement | Notes |
 |---|---|
 | Omarchy / Arch Linux on x86_64, with a graphical desktop session | the scraper's visible mode needs a real display |
-| **Python 3.10 or newer** | the machine's own system Python — Arch ships it, nothing to add |
+| **The system's own Python** | the one your distribution ships and keeps current — 3.14 on a current Arch; nothing to add |
 | **Brave Nightly** at `/opt/brave.com/brave-nightly/brave` | the only browser used |
 | Brave Nightly **opened at least once** and signed in | sign-ins do not travel between machines; they must exist on this machine |
 | `gnome-keyring` running | this is what decrypts the saved logins |
 | `git` and internet access | to fetch this setup and the Python packages |
 | Node.js | **not needed.** See §10. Install or ignore it as you wish. |
 
-What `--check` actually tests: the home directory, the system Python (3.10 or
-newer), Brave Nightly, whether the keyring is running, whether a systemd user
-session exists, and whether a daily Brave profile exists. It does **not** test
+What `--check` actually tests: the home directory, the system Python, Brave
+Nightly, whether the keyring is running, whether a systemd user session exists,
+and whether a daily Brave profile exists. It does **not** test
 Node.js, `git`, your CPU, or the network.
 
 ---
@@ -289,7 +289,7 @@ Result: success / failed at step N
 
 | Check                            | Result |
 |----------------------------------|--------|
-| System Python found (3.10+)      |        |
+| System Python found              |        |
 | Brave Nightly found              |        |
 | Scrapling installed              |        |
 | Login sync timer active          |        |
@@ -316,7 +316,7 @@ Rules for the report:
 
 | What you see | What it means | What to do |
 |---|---|---|
-| `no Python 3.10 or newer on this machine` | the system Python is missing or too old | stop and report; do not install one |
+| `the system Python is missing or older than 3.10` | the system Python is absent or too old | stop and report; do not install one |
 | `Brave Nightly is missing at ...` | Brave is not where it is expected | stop and report |
 | `your daily Brave is running` | Brave is open, so the profile cannot be captured safely | close Brave, run again |
 | `gnome-keyring-daemon is not running in this session` | a warning, not a stop: logins cannot be decrypted until it runs | report it; a fresh graphical session usually fixes it |

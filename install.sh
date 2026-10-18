@@ -20,11 +20,11 @@ set -euo pipefail
 
 SOURCE_HOME="/home/dhh"
 BRAVE_BIN="/opt/brave.com/brave-nightly/brave"
-# Scrapling 0.5, pinned so two machines bring up the same thing. 0.5 needs
-# Python 3.10 or newer and ships two fetching engines -- plain HTTP, and the
-# stealth browser; the old Playwright "dynamic" engine was removed upstream,
-# which is why the hidden-browser tier in modules/scrapling_brave.py runs the
-# stealth engine. Every dependency has a wheel, so nothing is built from source.
+# Scrapling 0.5, pinned so two machines bring up the same thing. 0.5 ships two
+# fetching engines -- plain HTTP, and the stealth browser; the old Playwright
+# "dynamic" engine was removed upstream, which is why the hidden-browser tier in
+# modules/scrapling_brave.py runs the stealth engine. It runs on the system's own
+# Python, and every dependency has a wheel, so nothing is built from source.
 SCRAPLING_PIN="scrapling[all]==0.5"
 PINNED_VERSION="${SCRAPLING_PIN##*==}"
 VENV="$HOME/venvs/scrapling"
@@ -74,12 +74,14 @@ step "Preflight"
 [[ -d "$HOME" ]] || die "no home directory"
 
 # Use the Python this machine already has -- the system's own -- so the stack
-# needs no interpreter of its own, and nothing here pins a version number that
-# can go stale when the distribution moves forward. Scrapling 0.5 needs 3.10 or
-# newer, and every one of its dependencies ships a wheel, so nothing is compiled.
+# needs no interpreter of its own, and nothing here names a version that can go
+# stale when the distribution moves forward. Every dependency ships a wheel, so
+# nothing is compiled.
 #
-# Nothing is installed either way: if no suitable Python exists here, that is a
-# problem to report, not to solve by installing things.
+# The 3.10 in the check below is Scrapling's own minimum, not a preference: it is
+# there only to stop with a clear sentence on an ancient Python. Nothing is
+# installed either way -- a missing or too-old Python is a problem to report, not
+# to solve by installing things.
 HAVE_UV=0
 if command -v uv >/dev/null 2>&1; then
   HAVE_UV=1
@@ -97,7 +99,7 @@ for candidate in /usr/bin/python3 \
   fi
 done
 [[ -n "$PY" ]] \
-  || die "no Python 3.10 or newer on this machine. Install your distribution's Python, then re-run."
+  || die "the system Python is missing or older than 3.10 (Scrapling's minimum). Install your distribution's Python, then re-run."
 PYVER="$("$PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
 ok "Python $PYVER found: $(readlink -f "$PY")"
 
@@ -142,8 +144,8 @@ step "Python environment"
 # uv is a preference here, not a requirement.
 #
 # The system Python deliberately: it is the one the distribution keeps current,
-# so no version number here goes stale. Scrapling 0.5 needs 3.10 or newer and
-# every dependency ships a wheel, so there is no source build and no toolchain.
+# so no version number here goes stale, and every dependency ships a wheel, so
+# there is no source build and no toolchain.
 #
 # Nothing is installed system-wide either way. Everything lives under $HOME.
 install_stack() {
