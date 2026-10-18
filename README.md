@@ -58,16 +58,41 @@ nothing to configure.
 `btrfs filesystem du -s <folder>` is the honest number; read the **Exclusive**
 column.
 
+## What "stealth" means here
+
+Scrapling works up a three-step ladder and uses the cheapest step that works:
+
+| Step | What it opens | When it is used |
+|---|---|---|
+| 1 | nothing — a plain request that impersonates Chrome's handshake | ordinary pages; by far the fastest |
+| 2 | the stealth browser, with no window | pages that need JavaScript to build themselves |
+| 3 | the stealth browser, visible, solving bot walls | sites that answer with a challenge |
+
+**Stealth is not about hiding who you are.** It means the browser does not give
+off the usual signs of being driven by software — the tells a site uses to tell
+an automated visit from a real one: a `HeadlessChrome` label, a software-drawn
+WebGL renderer, missing browser hints, automation hooks left in the page.
+Scrapling's browser engine is **Patchright**, a patched build of the Playwright
+driver that removes those tells, and here it drives the Brave already on your
+machine with your own profile — so what a site sees is your normal browser.
+
+Steps 2 and 3 are the same engine; step 2 just runs it without a window. Step 1
+opens no browser at all.
+
 ## Requirements
 
 Omarchy/Arch on x86_64 with a graphical session, **Brave Nightly**
 (`yay -S brave-nightly-bin`, landing at `/opt/brave.com/brave-nightly/brave`),
-**Python 3.13**, and a running **gnome-keyring**.
+**Python 3.15**, and a running **gnome-keyring**.
 
 That is the whole list. `install.sh` checks each one and stops with a clear
 message if something is missing — it does not install anything for you.
-`uv` is used if it happens to be present, but it is not required; the system's
-own `python3.13` builds the same environment.
+
+**uv is preferred; pip does the same job.** `uv` creates the environment and
+installs the packages when it is present, and the system's own `python3.15 -m
+pip` builds an identical environment when it is not. Neither needs anything
+system-wide. Python 3.15 is deliberate: Scrapling 0.5 needs 3.10 or newer, and
+on 3.15 every dependency resolves to a ready-made wheel, so nothing is compiled.
 
 Node.js is not needed either: the browser drivers that come with Scrapling carry
 their own copy.

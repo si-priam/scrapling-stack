@@ -48,11 +48,24 @@ Scrapling works up a three-step ladder and uses the cheapest step that works:
 
 | Step | What it opens | When it is used |
 |---|---|---|
-| 1 | nothing — a plain web request | simple pages; the fastest by far |
-| 2 | a browser, hidden (headless) | pages that need JavaScript to fill in |
-| 3 | a browser, visible (headed, stealth-patched) | sites that put up a bot wall |
+| 1 | nothing — a plain web request that impersonates Chrome | simple pages; the fastest by far |
+| 2 | the stealth browser, hidden (no window) | pages that need JavaScript to fill in |
+| 3 | the stealth browser, visible, solving bot walls | sites that put up a bot wall |
 
 If step 1 gets the page, no browser is ever opened. That is the normal case.
+
+**What "stealth" means.** It does not mean hiding who the owner is. A site can
+tell a browser driven by software from a real one by a handful of tells: a
+`HeadlessChrome` label, a software-drawn (SwiftShader) WebGL renderer, missing
+browser hints, automation hooks left in the page. Scrapling's browser engine is
+**Patchright**, a patched Playwright driver that removes those tells, and here it
+drives the machine's own Brave with the owner's own profile — so the site sees an
+ordinary visit from the owner's browser, carrying the owner's logins.
+
+Steps 2 and 3 are that same engine, headless and headed. Scrapling 0.5 ships only
+two engines in total — plain HTTP, and this browser. The plain-Playwright engine
+older versions had was removed upstream, which is why both browser steps use the
+stealth one.
 
 ---
 
@@ -65,14 +78,14 @@ the ones that matter and reports what it finds.
 | Requirement | Notes |
 |---|---|
 | Omarchy / Arch Linux on x86_64, with a graphical desktop session | the scraper's visible mode needs a real display |
-| **Python 3.13** | system-wide, or on `PATH` |
+| **Python 3.15** | system-wide, or on `PATH`; `uv` may provide it instead |
 | **Brave Nightly** at `/opt/brave.com/brave-nightly/brave` | the only browser used |
 | Brave Nightly **opened at least once** and signed in | sign-ins do not travel between machines; they must exist on this machine |
 | `gnome-keyring` running | this is what decrypts the saved logins |
 | `git` and internet access | to fetch this setup and the Python packages |
 | Node.js | **not needed.** See §10. Install or ignore it as you wish. |
 
-What `--check` actually tests: the home directory, Python 3.13 (or `uv`), Brave
+What `--check` actually tests: the home directory, Python 3.15 (or `uv`), Brave
 Nightly, whether the keyring is running, whether a systemd user session exists,
 and whether a daily Brave profile exists. It does **not** test Node.js, `git`,
 your CPU, or the network.
@@ -173,7 +186,7 @@ So you can follow along and know which part failed if something does.
 | # | Stage | What happens |
 |---|---|---|
 | 1 | **Preflight** | checks every requirement in §2 that matters. Changes nothing. Stops with one plain sentence if something is missing. |
-| 2 | **Python environment** | creates `~/venvs/scrapling` using the Python 3.13 already on the machine, then installs Scrapling pinned to `0.4.15`. Uses `uv` if present, otherwise the system's own `python3.13`. Nothing system-wide. |
+| 2 | **Python environment** | creates `~/venvs/scrapling` using the Python 3.15 already on the machine, then installs Scrapling pinned to `0.5`. Uses `uv` when it is present, otherwise the system's own `python3.15`; both build the same environment. Nothing system-wide. |
 | 3 | **Placing the files** | the scraper code goes to `~/.local/share/scrapling/`, the commands to `~/venvs/scrapling/bin/`, plus the measured results file and a small policy file. |
 | 4 | **Reclaiming space** | Playwright and Patchright each ship an identical 127 MB copy of Node.js. On a btrfs disk they are made to share one copy. On other filesystems they are left as they are. |
 | 5 | **Profile share** | the scraper gets a **share** of the Brave profile, not a copy — on btrfs. On other filesystems it falls back to a real copy (about 250 MB) and says so. |
@@ -273,7 +286,7 @@ Result: success / failed at step N
 
 | Check                            | Result |
 |----------------------------------|--------|
-| Python 3.13 found                |        |
+| Python 3.15 found                |        |
 | Brave Nightly found              |        |
 | Scrapling installed              |        |
 | Login sync timer active          |        |
@@ -300,7 +313,7 @@ Rules for the report:
 
 | What you see | What it means | What to do |
 |---|---|---|
-| `no Python 3.13 on this machine` | Python 3.13 is genuinely absent | stop and report; do not install it |
+| `no Python 3.15 on this machine` | Python 3.15 is genuinely absent | stop and report; do not install it |
 | `Brave Nightly is missing at ...` | Brave is not where it is expected | stop and report |
 | `your daily Brave is running` | Brave is open, so the profile cannot be captured safely | close Brave, run again |
 | `gnome-keyring-daemon is not running in this session` | a warning, not a stop: logins cannot be decrypted until it runs | report it; a fresh graphical session usually fixes it |
@@ -383,7 +396,7 @@ time, never again.
 
 It is finished when all of these are true:
 
-- Scrapling is installed for Python 3.13 at `~/venvs/scrapling`, pinned to `0.4.15`
+- Scrapling is installed for Python 3.15 at `~/venvs/scrapling`, pinned to `0.5`
 - The commands in §10 are present and runnable
 - The scraper works in a share of the Brave profile, and its logins decrypt
 - `scrapling-sync.timer` is `active`, and `scrapling-sync --status` reports cookies and login sites

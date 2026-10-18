@@ -6,8 +6,18 @@ No Chromium download. No sudo. No second browser. No re-login.
 
     smart("https://example.com")            # auto-escalates; fast when it can
     fetch("https://example.com")            # plain HTTP only
-    dynamic("https://js-heavy.com")         # Brave headless
-    stealth("https://cloudflare-wall.com")  # Brave headed + patchright
+    dynamic("https://js-heavy.com")         # Brave, headless
+    stealth("https://cloudflare-wall.com")  # Brave, headed, solves bot walls
+
+The engines (Scrapling 0.5)
+---------------------------
+0.5 ships two: ``Fetcher`` -- plain HTTP with curl_cffi TLS impersonation -- and
+the stealth browser, ``StealthyFetcher``/``StealthySession``, which is Patchright
+underneath. The old vanilla-Playwright "dynamic" engine was removed upstream, so
+``dynamic()`` and ``stealth()`` are the same engine, headless and headed
+respectively; the two names are kept because the tiers mean different things.
+``brave()`` points either one at the Brave already on this machine, with your
+logins, so no browser is ever downloaded.
 
 Why these settings exist
 ------------------------
@@ -57,9 +67,11 @@ import re
 import time
 from typing import Any, Iterable, Optional
 
+# Scrapling 0.5 has no vanilla-Playwright engine: `DynamicFetcher` was removed
+# upstream, and the only browser engine it ships is the Patchright-based stealth
+# one. Tier 2 below therefore runs that engine headless, and tier 3 runs it headed.
 from scrapling.fetchers import (
     Fetcher,
-    DynamicFetcher,
     StealthyFetcher,
     AsyncStealthySession,
 )
@@ -248,14 +260,18 @@ def fetch(url: str, **kw):
 # --------------------------------------------------------------------------- #
 
 def dynamic(url: str, profile: str = "Default", headless: bool = True, **kw):
-    """Tier 2: Playwright + your Brave, headless. For JS-rendered sites.
+    """Tier 2: the stealth browser + your Brave, with no window. For JS-rendered
+    sites.
 
     Headless is still detectable (HeadlessChrome token, SwiftShader WebGL, no
     Client Hints), so this tier is for sites without a WAF. For WAF-protected
     sites use `stealth` or `smart`.
     """
     kw.setdefault("useragent", BRAVE_UA)
-    return DynamicFetcher.fetch(url, **brave(profile, headless), **kw)
+    kw.setdefault("solve_cloudflare", False)
+    # Same engine as tier 3, run headless: 0.5 has no separate hidden-browser
+    # engine. Wall-solving is left to tier 3.
+    return StealthyFetcher.fetch(url, **brave(profile, headless), **kw)
 
 
 # --------------------------------------------------------------------------- #
@@ -289,15 +305,12 @@ def session(profile: str = "Default", headless: bool = False,
             for url in urls:
                 page = s.fetch(url)
 
-    Patchright is used when solve_cloudflare is set (StealthySession),
-    otherwise vanilla Playwright (DynamicSession) is faster.
+    Only one session class exists in 0.5: StealthySession (Patchright). The
+    vanilla-Playwright DynamicSession was removed upstream along with its engine,
+    so ``solve_cloudflare`` no longer changes which class is used.
     """
     opts = brave(profile, headless)
-    if solve_cloudflare:
-        return StealthySession(**opts, max_pages=max_pages, **kw)
-    from scrapling.engines._browsers._controllers import DynamicSession
-
-    return DynamicSession(**opts, max_pages=max_pages, **kw)
+    return StealthySession(**opts, max_pages=max_pages, **kw)
 
 
 # --------------------------------------------------------------------------- #

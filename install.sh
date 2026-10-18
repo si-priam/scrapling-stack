@@ -9,7 +9,7 @@
 #   ./install.sh --check      # preflight only, change nothing
 #
 # What it builds:
-#   ~/venvs/scrapling                     Python stack (scrapling 0.4.15, pinned)
+#   ~/venvs/scrapling                     Python stack (scrapling 0.5, pinned)
 #   ~/.local/share/scrapling              the modules + the scraper's profile
 #   ~/.config/systemd/user/scrapling-*    two-minute login sync, as a user timer
 #   ~/.config/opencode/opencode.jsonc     the Scrapling MCP server entry
@@ -20,7 +20,12 @@ set -euo pipefail
 
 SOURCE_HOME="/home/dhh"
 BRAVE_BIN="/opt/brave.com/brave-nightly/brave"
-SCRAPLING_PIN="scrapling[all]==0.4.15"
+# Scrapling 0.5, pinned so two machines bring up the same thing. 0.5 needs
+# Python 3.10 or newer and ships two fetching engines -- plain HTTP, and the
+# stealth browser; the old Playwright "dynamic" engine was removed upstream,
+# which is why the hidden-browser tier in modules/scrapling_brave.py runs the
+# stealth engine. Every dependency has a wheel, so nothing is built from source.
+SCRAPLING_PIN="scrapling[all]==0.5"
 VENV="$HOME/venvs/scrapling"
 SHARE="$HOME/.local/share/scrapling"
 PROFILE="$SHARE/brave-profile"
@@ -52,20 +57,25 @@ step "Preflight"
 
 [[ -d "$HOME" ]] || die "no home directory"
 
-# Find a Python 3.13. Prefer uv if it is on the machine, but the system's own
-# python3.13 is just as good. Nothing is fetched: if neither exists, that is a
-# problem to report, not to solve by installing things.
+# Find Python 3.15. uv is preferred when it is on the machine -- it resolves
+# interpreters cleanly -- but the system's own python3.15 is just as good.
+# 3.15 deliberately: Scrapling 0.5 needs 3.10 or newer, and on 3.15 every
+# dependency resolves to a wheel, so nothing is compiled.
+#
+# Nothing is installed either way: if no 3.15 exists here, that is a problem to
+# report, not to solve by installing things.
+PYVER="3.15"
 HAVE_UV=0
 PY313=""
-if command -v uv >/dev/null 2>&1 && PY313="$(uv python find 3.13 2>/dev/null)" && [[ -n "$PY313" ]]; then
+if command -v uv >/dev/null 2>&1 && PY313="$(uv python find "$PYVER" 2>/dev/null)" && [[ -n "$PY313" ]]; then
   HAVE_UV=1
   ok "uv $(uv --version 2>/dev/null | awk '{print $2}')"
-  ok "Python 3.13 found: $PY313"
-elif command -v python3.13 >/dev/null 2>&1; then
-  PY313="$(command -v python3.13)"
-  ok "Python 3.13 found: $PY313"
+  ok "Python $PYVER found: $PY313"
+elif command -v "python$PYVER" >/dev/null 2>&1; then
+  PY313="$(command -v "python$PYVER")"
+  ok "Python $PYVER found: $PY313"
 else
-  die "no Python 3.13 on this machine (and no uv to provide one). Install Python 3.13, then re-run."
+  die "no Python $PYVER on this machine (and no uv to provide one). Install Python $PYVER, then re-run."
 fi
 
 [[ -x "$BRAVE_BIN" ]] \
@@ -104,12 +114,15 @@ fi
 # --------------------------------------------------------------------------
 step "Python environment"
 
-# 3.13 deliberately: curl_cffi 0.16.3 publishes no cp314 wheel, so a 3.14 would
-# try to build it from source and pull in a Rust toolchain.
+# uv first: it is faster and resolves the interpreter before creating the
+# environment. pip is the fallback and builds exactly the same environment --
+# uv is a preference here, not a requirement.
 #
-# uv is used when it is on the machine because it is quicker, but it is not
-# required: the system's own python3.13 builds the same environment. Nothing is
-# installed system-wide either way. Everything lives under $HOME.
+# 3.15 deliberately: Scrapling 0.5 needs 3.10 or newer, and on 3.15 every
+# dependency resolves to a wheel (curl-cffi ships an abi3 wheel covering 3.10 to
+# 3.15), so there is no source build and no Rust toolchain.
+#
+# Nothing is installed system-wide either way. Everything lives under $HOME.
 install_stack() {
   if [[ "$HAVE_UV" == "1" ]]; then
     uv pip install --python "$VENV/bin/python" "$SCRAPLING_PIN"
@@ -128,9 +141,9 @@ if [[ -x "$VENV/bin/python" ]]; then
     install_stack
   fi
 else
-  log "creating $VENV on Python 3.13"
+  log "creating $VENV on Python $PYVER"
   if [[ "$HAVE_UV" == "1" ]]; then
-    uv venv "$VENV" --python 3.13
+    uv venv "$VENV" --python "$PYVER"
   else
     "$PY313" -m venv "$VENV"
   fi
@@ -182,7 +195,7 @@ ok "commands in $VENV/bin"
 step "Reclaiming duplicate runtime"
 
 dedupe_node() {
-  local P="$VENV/lib/python3.13/site-packages"
+  local P="$VENV/lib/python$PYVER/site-packages"
   local a="$P/playwright/driver/node" b="$P/patchright/driver/node"
   [[ -f "$a" && -f "$b" ]] || { warn "driver binaries not found; skipping"; return 0; }
   if [[ "$(sha256sum "$a" | cut -d' ' -f1)" != "$(sha256sum "$b" | cut -d' ' -f1)" ]]; then
