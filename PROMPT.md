@@ -81,7 +81,7 @@ the ones that matter and reports what it finds.
 | Requirement | Notes |
 |---|---|
 | Omarchy / Arch Linux on x86_64, with a graphical desktop session | the scraper's visible mode needs a real display |
-| **The system's own Python** | the one your distribution ships and keeps current — 3.14 on a current Arch; nothing to add |
+| **The system's own Python** | the one your distribution ships and keeps current — 3.14 on a current Arch, the same Python the rest of the system is built against; take it as it is, patch level and all, nothing to add |
 | **Brave Nightly** at `/opt/brave.com/brave-nightly/brave` | the only browser used |
 | Brave Nightly **opened at least once** and signed in | sign-ins do not travel between machines; they must exist on this machine |
 | `gnome-keyring` running | this is what decrypts the saved logins |
@@ -189,7 +189,7 @@ So you can follow along and know which part failed if something does.
 | # | Stage | What happens |
 |---|---|---|
 | 1 | **Preflight** | checks every requirement in §2 that matters. Changes nothing. Stops with one plain sentence if something is missing. |
-| 2 | **Python environment** | creates `~/venvs/scrapling` using the system Python already on the machine, then installs Scrapling pinned to `0.5`. An environment left on a Python the machine no longer has is rebuilt. Uses `uv` when it is present, otherwise the system's own `pip`; both build the same environment. Nothing system-wide. |
+| 2 | **Python environment** | creates `~/venvs/scrapling` from the system Python already on the machine — the same 3.14 the system's other packages are built against, at whatever patch level is installed — then installs Scrapling pinned to `0.5`. An environment left on a Python the machine no longer has is rebuilt. Uses `uv` when it is present, otherwise the system's own `pip`; both build the same environment. Nothing system-wide. |
 | 3 | **Placing the files** | the scraper code goes to `~/.local/share/scrapling/`, the commands to `~/venvs/scrapling/bin/`, plus the measured results file and a small policy file. |
 | 4 | **Reclaiming space** | Playwright and Patchright each ship an identical 127 MB copy of Node.js. On a btrfs disk they are made to share one copy. On other filesystems they are left as they are. |
 | 5 | **Profile share** | the scraper gets a **share** of the Brave profile, not a copy — on btrfs. On other filesystems it falls back to a real copy (about 250 MB) and says so. |

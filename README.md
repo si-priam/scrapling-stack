@@ -102,5 +102,11 @@ keeps current, so no version number here can go stale when the system moves
 forward, and every dependency resolves to a ready-made wheel, so nothing is
 compiled.
 
+That Python is not a second one. It is the same system package the rest of your
+system's software is built against — 3.14 on a current Arch — taken exactly as
+your system has it, patch level included; no patch level is pinned here. The
+scraper's own packages live in a private environment of their own, so they
+neither depend on nor disturb the system's Python packages.
+
 Node.js is not needed either: the browser drivers that come with Scrapling carry
 their own copy.

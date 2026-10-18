@@ -73,10 +73,11 @@ step "Preflight"
 
 [[ -d "$HOME" ]] || die "no home directory"
 
-# Use the Python this machine already has -- the system's own -- so the stack
-# needs no interpreter of its own, and nothing here names a version that can go
-# stale when the distribution moves forward. Every dependency ships a wheel, so
-# nothing is compiled.
+# Use the Python this machine already has -- the distribution's own, the same
+# python package the rest of the system's software is built against, at whatever
+# patch level is installed. The stack therefore adds no second Python, and
+# nothing here names a version that can go stale when the distribution moves
+# forward. Every dependency ships a wheel, so nothing is compiled.
 #
 # The 3.10 in the check below is Scrapling's own minimum, not a preference: it is
 # there only to stop with a clear sentence on an ancient Python. Nothing is
@@ -145,7 +146,9 @@ step "Python environment"
 #
 # The system Python deliberately: it is the one the distribution keeps current,
 # so no version number here goes stale, and every dependency ships a wheel, so
-# there is no source build and no toolchain.
+# there is no source build and no toolchain. Its packages live in this
+# environment, not in the system, so they neither depend on nor disturb the
+# system's own Python packages.
 #
 # Nothing is installed system-wide either way. Everything lives under $HOME.
 install_stack() {
